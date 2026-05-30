@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Vendored Epic Games code — NOT redistributed (Copyright Epic Games, Inc., All Rights Reserved).
+# Copy it from your own UE install per the README "Setup" step.
+src/unreal_mcp/vendor/remote_execution.py
+
+# Machine-specific MCP config (use .mcp.json.example as the template)
+.mcp.json
+
+# Local agent / session / editor context (not part of the project)
+.claude/
+.remember/
+CLAUDE.md
+DESIGN_SEED.md
