@@ -2,6 +2,8 @@
 name = "unreal-mcp"
 version = "0.1.0"
 description = "Self-owned MCP server controlling the Unreal Engine 5.7 editor via Python Remote Execution"
+license = { text = "MIT" }
+authors = [{ name = "Carl Roach" }]
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.2,<2",
