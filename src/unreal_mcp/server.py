@@ -23,6 +23,7 @@ from unreal_mcp.snippets import (
     automation_tests as _automation,
     cinematic as _cine,
     config_settings as _config,
+    cr_seq as _crseq,
     delete_actors as _delete_actors,
     editor_extra as _editor_extra,
     eyes as _eyes,
@@ -34,6 +35,7 @@ from unreal_mcp.snippets import (
     open_level as _open_level,
     run_console_command as _console,
     save_level as _save_level,
+    seq_keyframe as _seqkey,
     set_property as _set_property,
     spawn_actor as _spawn_actor,
     viewport as _viewport,
@@ -677,6 +679,74 @@ def get_section_property_values(section: str, property_names: list[str],
                                 container: str = "Project", category: str = "Engine") -> dict:
     """Read current values of named properties on a settings section. `section` = class name; snake_case props."""
     return client.run_snippet(_config.build_get_section_property_values(container, category, section, property_names))
+
+
+# --- Sequencer per-channel keyframing (SequencerKeyframingTools port; channels by NAME, e.g. 'Location.X') ---
+@mcp.tool()
+def seq_list_channels(sequence_path: str, target: str) -> dict:
+    """Discover keyframable channels. `target`='master' or an actor label/name; lists every track on the
+    binding (+ its component child bindings) with section indices and channel names. Call this first to
+    learn the channel names the other seq_* tools want."""
+    return client.run_snippet(_seqkey.build_list_channels(sequence_path, target))
+
+
+@mcp.tool()
+def seq_keyframe(sequence_path: str, target: str, channel: str, keys: list[dict],
+                 track_hint: str | int | None = None, section: int = 0,
+                 value_type: str = "float") -> dict:
+    """Add keys to one channel by name. keys=[{frame|time_s, value, interp?}]; interp (float only):
+    auto|user|linear|constant|break|smart (default smart). track_hint = substring of the track type
+    ('Transform','Visibility',...) or an int index; omit when the binding has one track. value_type:
+    float|bool|int|string. This is the interpolation control film.py's bundled tools can't express."""
+    return client.run_snippet(_seqkey.build_keyframe(sequence_path, target, channel, keys, track_hint, section, value_type))
+
+
+@mcp.tool()
+def seq_get_keys(sequence_path: str, target: str, channel: str,
+                 track_hint: str | int | None = None, section: int = 0) -> dict:
+    """Read every key on a channel back: [{frame, value}] in display-rate frames. The read-back/verify
+    primitive (and what bake would have given for inspection)."""
+    return client.run_snippet(_seqkey.build_get_keys(sequence_path, target, channel, track_hint, section))
+
+
+@mcp.tool()
+def seq_remove_key(sequence_path: str, target: str, channel: str, frame: int,
+                   track_hint: str | int | None = None, section: int = 0) -> dict:
+    """Remove the key at a specific display-rate frame from a channel. Returns removed=False if none there."""
+    return client.run_snippet(_seqkey.build_remove_key(sequence_path, target, channel, frame, track_hint, section))
+
+
+@mcp.tool()
+def seq_set_default(sequence_path: str, target: str, channel: str, value: float,
+                    track_hint: str | int | None = None, section: int = 0) -> dict:
+    """Set a channel's default (constant) value - the value used where there are no keys."""
+    return client.run_snippet(_seqkey.build_set_default(sequence_path, target, channel, value, track_hint, section))
+
+
+# --- Control Rig in Sequencer (SequencerControlRigTools port; animate Buck inside Unreal, no Blender round-trip) ---
+@mcp.tool()
+def cr_add_track(sequence_path: str, target: str, control_rig_asset_path: str | None = None,
+                 layered: bool = False) -> dict:
+    """Attach a Control Rig track to a skeletal-mesh actor binding. control_rig_asset_path=None -> the
+    engine FK Control Rig (auto controls from the skeleton; populate via cr_bake_anim). A custom CR asset
+    path -> that rig, controls available immediately. `target` = actor label/name in the level."""
+    return client.run_snippet(_crseq.build_cr_add_track(sequence_path, target, control_rig_asset_path, layered))
+
+
+@mcp.tool()
+def cr_bake_anim(sequence_path: str, target: str, anim_path: str, reduce_keys: bool = False,
+                 tolerance: float = 0.001) -> dict:
+    """Bake an existing AnimSequence onto an FK Control Rig -> the performance becomes an editable, fully
+    keyed rig (65 controls / 585 channels for a standard skeleton). THE way to make Buck's air-guitar (or
+    any clip) editable in-engine. Edit the result with seq_keyframe (track_hint='ControlRig')."""
+    return client.run_snippet(_crseq.build_cr_bake_anim(sequence_path, target, anim_path, reduce_keys, tolerance))
+
+
+@mcp.tool()
+def cr_list_controls(sequence_path: str) -> dict:
+    """List the Control Rigs in a sequence and each rig's control names (the things you pose). For the
+    keyable per-control channels, use seq_list_channels with track_hint='ControlRig'."""
+    return client.run_snippet(_crseq.build_cr_list_controls(sequence_path))
 
 
 def main() -> None:
