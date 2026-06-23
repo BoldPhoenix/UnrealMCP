@@ -33,6 +33,7 @@ from unreal_mcp.snippets import (
     live_coding as _livecoding,
     move_actor as _move,
     open_level as _open_level,
+    retarget as _retarget,
     run_console_command as _console,
     save_level as _save_level,
     seq_keyframe as _seqkey,
@@ -747,6 +748,28 @@ def cr_list_controls(sequence_path: str) -> dict:
     """List the Control Rigs in a sequence and each rig's control names (the things you pose). For the
     keyable per-control channels, use seq_list_channels with track_hint='ControlRig'."""
     return client.run_snippet(_crseq.build_cr_list_controls(sequence_path))
+
+
+# --- Reference-driven motion: mocap import + retarget (front end of REFERENCE_MOCAP_PIPELINE.md) ---
+@mcp.tool()
+def import_mocap(fbx_path: str, destination_path: str = "/Game/Mocap", skeleton: str | None = None,
+                 import_mesh: bool = True, replace_existing: bool = True, save: bool = True) -> dict:
+    """Import a mocap FBX (e.g. a DeepMotion Animate 3D export) for the reference-motion pipeline.
+    skeleton=None -> full import (source SkeletalMesh + Skeleton + AnimSequence); skeleton='/Game/...' ->
+    anim-only import bound to that skeleton. Returns classified {source_mesh, source_skeleton, anim} paths
+    to feed retarget_anim. (Free-tier DeepMotion output is non-commercial: R&D/test only; ship on a paid plan.)"""
+    return client.run_snippet(_retarget.build_import_mocap(fbx_path, destination_path, skeleton, import_mesh, replace_existing, save))
+
+
+@mcp.tool()
+def retarget_anim(source_anim: str, source_mesh: str, target_mesh: str, destination_path: str = "/Game/Mocap",
+                  retargeter: str | None = None, name: str | None = None, save: bool = True) -> dict:
+    """Retarget an AnimSequence from source_mesh onto target_mesh (e.g. DeepMotion human -> Buck) - the core
+    front-end tool. retargeter=None AUTO-authors an IK Rig per skeleton (humanoid-template auto chains +
+    FBIK) and an IK Retargeter (auto chain-map + bone-align), then runs the one-call batch retarget. Pass a
+    pre-authored IKRetargeter path to override for stylised rigs. Returns the retargeted AnimSequence path,
+    ready for cr_bake_anim -> seq_keyframe -> render."""
+    return client.run_snippet(_retarget.build_retarget_anim(source_anim, source_mesh, target_mesh, destination_path, retargeter, name, save))
 
 
 def main() -> None:
