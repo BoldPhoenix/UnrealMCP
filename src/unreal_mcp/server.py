@@ -10,6 +10,7 @@ Right now it has no tools yet - that's increment 3 onward (run_console_command f
 
 import json
 import os
+import re
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP, Image
@@ -31,6 +32,7 @@ from unreal_mcp.snippets import (
     save_level as _save_level,
     set_property as _set_property,
     spawn_actor as _spawn_actor,
+    viewport as _viewport,
 )
 
 # The editor's on-disk log (for get_output_log) - derived from the configured project + uproject name.
@@ -138,6 +140,56 @@ def asset_search(path: str = "/Game", class_name: str | None = None, limit: int 
 def get_output_log(lines: int = 200) -> dict:
     """Read the tail of the editor's on-disk output log (honest disk read, not an in-editor query)."""
     return {"log_path": _LOG_PATH, "lines": lines, "text": client.read_text_tail(_LOG_PATH, lines)}
+
+
+# --- structured logs (harvested from UE5.8 LogsToolset; implemented over our on-disk tail + console) ---
+@mcp.tool()
+def log_search(pattern: str, regex: bool = False, lines: int = 3000, limit: int = 100) -> dict:
+    """Filter the editor's on-disk log for lines matching `pattern` (instead of dumping the whole tail).
+
+    regex=False = case-insensitive substring match; regex=True = `pattern` is a Python regex. Scans the
+    last `lines` lines, returns up to `limit` matches (newest last) + total match count. Use when chasing
+    a specific category/error, e.g. "LogModelContextProtocol", "Warning:", "BuckCharacter".
+    """
+    text = client.read_text_tail(_LOG_PATH, lines)
+    rows = text.splitlines() if isinstance(text, str) else []
+    try:
+        rx = re.compile(pattern if regex else re.escape(pattern), re.IGNORECASE)
+    except re.error as e:
+        return {"error": f"bad regex: {e}", "pattern": pattern}
+    hits = [r for r in rows if rx.search(r)]
+    return {"pattern": pattern, "regex": regex, "scanned_lines": len(rows),
+            "match_count": len(hits), "matches": hits[-limit:], "log_path": _LOG_PATH}
+
+
+@mcp.tool()
+def log_categories(lines: int = 5000) -> dict:
+    """List the Unreal log CATEGORIES seen in the recent on-disk log, with hit counts (sorted by frequency).
+
+    Scans the last `lines` lines for `LogXxx:` tokens - the menu of category names to feed to log_search
+    or set_log_verbosity.
+    """
+    text = client.read_text_tail(_LOG_PATH, lines)
+    rows = text.splitlines() if isinstance(text, str) else []
+    counts: dict[str, int] = {}
+    for r in rows:
+        m = re.search(r"\b(Log[A-Za-z0-9_]+):", r)
+        if m:
+            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    ordered = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    return {"scanned_lines": len(rows), "category_count": len(ordered),
+            "categories": [{"category": c, "hits": n} for c, n in ordered]}
+
+
+@mcp.tool()
+def set_log_verbosity(category: str, level: str = "Log") -> dict:
+    """Set a log category's verbosity live via the `Log <category> <level>` console command.
+
+    level = Off | Error | Warning | Display | Log | Verbose | VeryVerbose | Default (restore). e.g.
+    set_log_verbosity("LogBlueprintUserMessages", "Verbose") before reproducing a bug, then "Default"
+    after. Needs a loaded editor world. Returns {"ran": "Log ..."} or {"error": "editor not ready"}.
+    """
+    return client.run_snippet(_console.build(f"Log {category} {level}"))
 
 
 @mcp.tool()
@@ -309,6 +361,49 @@ def eyes_overview(width: int = 1280, height: int = 1280, padding: float = 1.2):
     interior is visible). Fresh on-demand render; NOT disk truth. Returns a PNG image + metadata.
     """
     return _eyes_result(_eyes.build_overview(width, height, padding))
+
+
+# --- viewport / selection: drive + inspect the LIVE editor viewport (harvested from UE5.8 EditorAppToolset) ---
+@mcp.tool()
+def get_viewport_camera() -> dict:
+    """Read the live editor perspective-viewport camera pose -> {"location":[x,y,z], "rotation":[pitch,yaw,roll]}.
+
+    The REAL viewport camera (what's on screen), distinct from eyes_* (off-screen renders) and from
+    set_camera (a CineCameraActor's lens/DoF).
+    """
+    return client.run_snippet(_viewport.build_get_viewport_camera())
+
+
+@mcp.tool()
+def set_viewport_camera(location: list[float], rotation: list[float] | None = None,
+                        look_at: list[float] | None = None) -> dict:
+    """Move the editor viewport camera. location [x,y,z] + EITHER rotation [pitch,yaw,roll] OR look_at
+    [x,y,z] (auto-aims); omit both to keep current rotation. Pair with eyes_mirror to SEE the result.
+    (Moves the live viewport - the camera visibly jumps.)
+    """
+    return client.run_snippet(_viewport.build_set_viewport_camera(location, rotation, look_at))
+
+
+@mcp.tool()
+def get_selected_actors() -> dict:
+    """List actors currently selected in the editor -> {"count", "actors":[{name,label,class,location,rotation}]}."""
+    return client.run_snippet(_viewport.build_get_selected())
+
+
+@mcp.tool()
+def select_actors(actors: list[str], additive: bool = False) -> dict:
+    """Select level actors by label or name. additive=False replaces the selection, True adds.
+    Returns {"selected":[labels], "missing":[idents not found]}.
+    """
+    return client.run_snippet(_viewport.build_select(actors, additive))
+
+
+@mcp.tool()
+def focus_viewport(actors: list[str], distance: float | None = None) -> dict:
+    """Drive the REAL editor viewport camera to frame the given actors (by label/name) from their combined
+    bounds. distance defaults to 2.5x the framed radius. 'Go look at X' in the editor, then eyes_mirror.
+    """
+    return client.run_snippet(_viewport.build_focus_viewport(actors, distance))
 
 
 # --- cinematic core (validated live): author a camera move -> render via Movie Render Queue -> poll ---
