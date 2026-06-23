@@ -20,12 +20,16 @@ from unreal_mcp.editor_client import client
 from unreal_mcp.snippets import (
     asset_ops as _asset,
     asset_search as _asset_search,
+    automation_tests as _automation,
     cinematic as _cine,
+    config_settings as _config,
     delete_actors as _delete_actors,
+    editor_extra as _editor_extra,
     eyes as _eyes,
     film as _film,
     get_level_actors as _get_level_actors,
     get_status as _get_status,
+    live_coding as _livecoding,
     move_actor as _move,
     open_level as _open_level,
     run_console_command as _console,
@@ -543,6 +547,136 @@ def sequence_inspect(sequence_path: str) -> dict:
     length) - the get_level_actors for Sequencer. Use before re-binding to keep authoring idempotent.
     """
     return client.run_snippet(_film.build_sequence_inspect(sequence_path))
+
+
+# ===================== UE5.8 toolset harvest - batch 2 (DRAFTED 2026-06-22, pending live-verify) =====================
+# Ported from Epic's UE5.8 Toolsets but NOT yet proven on metal. Many carry # VERIFY bindings in their snippet
+# modules (config_settings + GAS/tags especially). They fail SOFT ({"error": ...}, never crash the bridge).
+# Verify live against the Ship, then keep / fix / drop before merge.
+
+# --- editor extra: PIE control, content browser, asset editor, cvars, projection (EditorAppToolset) ---
+@mcp.tool()
+def is_pie_running() -> dict:
+    """Report whether a PIE / Simulate session is active -> {"pie_running": bool, "world": <name|null>}."""
+    return client.run_snippet(_editor_extra.build_is_pie_running())
+
+
+@mcp.tool()
+def start_pie(simulate: bool = False) -> dict:
+    """Start Play-In-Editor (simulate=False) or Simulate-In-Editor (simulate=True). ASYNC; poll is_pie_running."""
+    return client.run_snippet(_editor_extra.build_start_pie(simulate))
+
+
+@mcp.tool()
+def stop_pie() -> dict:
+    """Stop the active PIE / Simulate session (ASYNC; poll is_pie_running)."""
+    return client.run_snippet(_editor_extra.build_stop_pie())
+
+
+@mcp.tool()
+def get_content_browser_path() -> dict:
+    """Best-effort read of the content browser's current folder (derived from selected asset folders)."""
+    return client.run_snippet(_editor_extra.build_get_content_browser_path())
+
+
+@mcp.tool()
+def set_content_browser_path(path: str) -> dict:
+    """Navigate the content browser to a folder, e.g. "/Game/Props" (best-effort)."""
+    return client.run_snippet(_editor_extra.build_set_content_browser_path(path))
+
+
+@mcp.tool()
+def get_selected_assets() -> dict:
+    """List assets selected in the content browser -> {"count", "assets": [{package, name, class}]}."""
+    return client.run_snippet(_editor_extra.build_get_selected_assets())
+
+
+@mcp.tool()
+def select_assets(paths: list[str]) -> dict:
+    """Select assets in the content browser by package path, e.g. ["/Game/Props/WD49"]."""
+    return client.run_snippet(_editor_extra.build_select_assets(paths))
+
+
+@mcp.tool()
+def open_editor_for_asset(asset_path: str) -> dict:
+    """Open the right asset editor for an asset (Material -> Material Editor, etc.)."""
+    return client.run_snippet(_editor_extra.build_open_editor_for_asset(asset_path))
+
+
+@mcp.tool()
+def search_cvars(substring: str, limit: int = 200) -> dict:
+    """Probe console variable(s) by name -> value + help. BEST-EFFORT (Python can't enumerate cvars)."""
+    return client.run_snippet(_editor_extra.build_search_cvars(substring, limit))
+
+
+@mcp.tool()
+def screen_to_world(screen_position: list[float], player_index: int = 0) -> dict:
+    """Deproject a screen [sx, sy] to a world ray (origin + direction). BEST-EFFORT - needs active PIE."""
+    return client.run_snippet(_editor_extra.build_screen_to_world(screen_position, player_index))
+
+
+# --- live coding (LiveCodingToolset; console-command triggered) ---
+@mcp.tool()
+def compile_live_coding() -> dict:
+    """Trigger a Live Coding compile of the editor's C++ (LiveCoding.Compile). ASYNC; read LogLiveCoding."""
+    return client.run_snippet(_livecoding.build())
+
+
+# --- automation tests (AutomationTestToolset; Automation console cmds; results land in the log) ---
+@mcp.tool()
+def list_tests() -> dict:
+    """Dump the discovered automation test list to the log (Automation List). Read via log_search("Automation")."""
+    return client.run_snippet(_automation.build_list_tests())
+
+
+@mcp.tool()
+def run_tests(test_filter: str | None = None) -> dict:
+    """Run automation tests by filter (ASYNC). None -> all (Automation RunAll). Results -> log."""
+    return client.run_snippet(_automation.build_run_tests(test_filter))
+
+
+@mcp.tool()
+def get_test_status() -> dict:
+    """Probe automation state (no Python API; issues Automation List + points at the log)."""
+    return client.run_snippet(_automation.build_get_test_status())
+
+
+@mcp.tool()
+def stop_tests() -> dict:
+    """Abort an in-progress automation run (Automation StopTests)."""
+    return client.run_snippet(_automation.build_stop_tests())
+
+
+# --- config settings (ConfigSettingsToolset; reflection over UDeveloperSettings CDOs; `section` = class name) ---
+@mcp.tool()
+def list_containers() -> dict:
+    """List settings containers. STATIC ["Editor","Project"] (registry not Python-exposed)."""
+    return client.run_snippet(_config.build_list_containers())
+
+
+@mcp.tool()
+def list_categories(container: str = "Project") -> dict:
+    """List categories in a container. STATIC stock list (registry not Python-discoverable)."""
+    return client.run_snippet(_config.build_list_categories(container))
+
+
+@mcp.tool()
+def list_sections(container: str = "Project", category: str = "Engine") -> dict:
+    """List Python-reachable UDeveloperSettings SUBCLASS NAMES (the `section` id the other config tools want)."""
+    return client.run_snippet(_config.build_list_sections(container, category))
+
+
+@mcp.tool()
+def get_section_schema(section: str, container: str = "Project", category: str = "Engine") -> dict:
+    """Describe a settings section's properties (best-effort {name: python_type}). `section` = class name."""
+    return client.run_snippet(_config.build_get_section_schema(container, category, section))
+
+
+@mcp.tool()
+def get_section_property_values(section: str, property_names: list[str],
+                                container: str = "Project", category: str = "Engine") -> dict:
+    """Read current values of named properties on a settings section. `section` = class name; snake_case props."""
+    return client.run_snippet(_config.build_get_section_property_values(container, category, section, property_names))
 
 
 def main() -> None:
