@@ -36,14 +36,21 @@ video → [mocap: NEW, external] → import → [retarget_anim: NEW] → cr_bake
 - **Preserve reference cadence.** Timing lives in the footage's frame rate; don't down-sample the retarget/bake to sparse keys — that reintroduces the v3 snap.
 - **Clean reference angle** (for any manual pose-match fallback): a front-ish reference reduces 2D→3D depth ambiguity.
 
-## External dependency (the one open piece)
-The video→mocap engine. Pluggable. Needs a markerless pose-estimation tool that outputs a UE-retargetable FBX/skeleton. **Sub-task:** pick + validate one. (Corp Bob offered to research current options that output UE-retargetable motion — do that pass before committing to an engine.)
+## Mocap engine — recommendation (researched + license-verified 2026-06-23, Corp Bob)
+The video→mocap engine is the one external/pluggable piece. **Decisive finding: the free OSS path is NOT cleanly usable for a shipped film.** The monocular models (WHAM, GVHMR) output **SMPL**, and SMPL is **non-commercial** — a separate paid commercial license is required from Max Planck. So "free OSS" carries a commercial-licensing encumbrance here, and the turnkey commercial services are the *correct* primary (not just the fast one): they grant clean commercial rights AND solve the FBX→UE path.
+
+- **PRIMARY → DeepMotion / Animate 3D.** US-origin (San Mateo, CA — clears the no-PRC rule). Single-camera video → **FBX / BVH / GLB**, with a published UE5 IK-retarget guide. Tiers: **Freemium = NON-commercial license only** (fine for R&D / the throwaway air-guitar test); **paid plans grant a perpetual worldwide COMMERCIAL license to the outputs** → the *shipped* film must run on a paid plan. Restriction: no reselling the raw mocap stand-alone (irrelevant — we animate Buck, we don't resell motion).
+  - ⚠ **Name-collision diligence:** a *separate, unrelated PRC company* is also called "DeepMotion." The mocap product is `deepmotion.com` / Animate 3D, **San Mateo CA (US)** — confirm you're on the US entity before committing.
+- **FALLBACK → Move.ai (Move One).** UK-origin (Move Ai Ltd) — non-PRC. Single-phone capture → FBX, UE-retargeting docs (`docs.move.ai`), top-tier single-cam quality. Commercial product; confirm current pricing/credits. Use when DeepMotion's quality isn't enough.
+- **AVOID for shipped work → OSS WHAM / GVHMR.** WHAM is MIT *code* but SMPL-dependent (non-commercial encumbrance), German/CMU origin; GVHMR is **Zhejiang University / PRC** (fails the no-PRC rule) and also SMPL-based. Fine for *free, non-shipped* R&D only — not the film, unless a SMPL commercial license is purchased.
+
+**UE-retarget path (either commercial engine):** engine exports an FBX on its own skeleton → import to UE → author an IK Rig for that source skeleton + an IK Rig for Buck → IK Retargeter maps source→Buck. That step is exactly what the `retarget_anim` tool above wraps; its output feeds `cr_bake_anim`.
 
 ## Validation case
 The **Buck air-guitar solo**. Prove `video(real air-guitar) → mocap → retarget_anim → cr_bake_anim → seq_keyframe → render` yields a solo that finally *rips*. Validating the capability and closing the air-guitar saga are the same act — the throwaway clip is the unit test for the whole pipeline.
 
 ## Suggested build order
-1. Pick + validate a mocap engine (research → one test FBX from a real air-guitar reference).
+1. Mocap engine = **DeepMotion / Animate 3D** (verified — see recommendation above; US-origin, single-cam → FBX, UE retarget guide, commercial on paid tiers). Validate with one test FBX from a real air-guitar reference on the **free tier** (the throwaway clip isn't shipped); the film later needs a paid plan for the commercial license.
 2. Import path (`asset_import` FBX-anim, or new `import_mocap`).
 3. `retarget_anim` (wrap IK Retargeter) — the core new tool; live-verify bindings on metal.
 4. End-to-end on the air-guitar reference → bake → tweak → render → compare against the freehand attempts.
