@@ -13,8 +13,11 @@ string-maps the chains (auto_map_chains) -> works for ANY humanoid source->targe
 authoring. Supply a pre-authored IKRetargeter asset to override the auto path for stylised rigs whose
 chains need hand tuning (Buck = stocky ogre; residual proportion fixes then happen in seq_keyframe).
 
-PROVEN live on UE5.8 (2026-06-23) - a Buck->Buck retarget of Buck_Playing_Guitar produced a real
-AnimSequence. IKRetargetBatchOperation.run_batch_retarget(IKRetargetBatchOperationInputs) is the one-call
+VERIFIED live on UE5.8 (2026-06-23): a Buck->Buck retarget of Buck_Playing_Guitar ran the full chain
+(auto-author both IK rigs -> auto-map -> run_batch_retarget) and emitted a real AnimSequence. NOTE this
+proves the PLUMBING only - same skeleton on both ends makes the chain map trivial, so the cross-skeleton
+retarget MATH (mocap human -> stocky Buck) is still unproven; that's the pending unit test, gated on a real
+DeepMotion FBX. IKRetargetBatchOperation.run_batch_retarget(IKRetargetBatchOperationInputs) is the one-call
 batch (duplicate_and_retarget is DEPRECATED and rejects loaded assets - the inputs struct wants AssetData,
 fetched via EditorAssetLibrary.find_asset_data). IKRigController.get_controller(rig).set_skeletal_mesh +
 apply_auto_generated_retarget_definition + apply_auto_fbik auto-build a rig; IKRetargeterController
@@ -66,19 +69,22 @@ def build_import_mocap(fbx_path, destination_path="/Game/Mocap", skeleton=None,
         "        task.set_editor_property('options', ui)\n"
         "        unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])\n"
         "        paths = [str(p) for p in (task.get_editor_property('imported_object_paths') or [])]\n"
-        "        mesh = skel = anim = None; others = []\n"
-        "        for p in paths:\n"
-        "            a = unreal.load_asset(p)\n"
-        "            if isinstance(a, unreal.SkeletalMesh): mesh = mesh or p\n"
-        "            elif isinstance(a, unreal.Skeleton): skel = skel or p\n"
-        "            elif isinstance(a, unreal.AnimSequence): anim = anim or p\n"
-        "            else: others.append(p)\n"
-        "        if skel is None and mesh is not None:\n"
-        "            m = unreal.load_asset(mesh); sk = m.get_editor_property('skeleton') if m else None\n"
-        "            skel = sk.get_path_name() if sk else None\n"
-        "        _emit({'imported': paths, 'count': len(paths), 'source_mesh': mesh, 'source_skeleton': skel,\n"
-        "               'anim': anim, 'others': others, 'destination': dst,\n"
-        "               'next': 'retarget_anim(source_anim=anim, source_mesh=source_mesh, target_mesh=<your character mesh>)'})\n"
+        "        if not paths:\n"
+        "            _emit({'error': 'import produced no assets - check the FBX path and skeleton compatibility', 'source': src, 'destination': dst})\n"
+        "        else:\n"
+        "            mesh = skel = anim = None; others = []\n"
+        "            for p in paths:\n"
+        "                a = unreal.load_asset(p)\n"
+        "                if isinstance(a, unreal.SkeletalMesh): mesh = mesh or p\n"
+        "                elif isinstance(a, unreal.Skeleton): skel = skel or p\n"
+        "                elif isinstance(a, unreal.AnimSequence): anim = anim or p\n"
+        "                else: others.append(p)\n"
+        "            if skel is None and mesh is not None:\n"
+        "                m = unreal.load_asset(mesh); sk = m.get_editor_property('skeleton') if m else None\n"
+        "                skel = sk.get_path_name() if sk else None\n"
+        "            _emit({'imported': paths, 'count': len(paths), 'source_mesh': mesh, 'source_skeleton': skel,\n"
+        "                   'anim': anim, 'others': others, 'destination': dst,\n"
+        "                   'next': 'retarget_anim(source_anim=anim, source_mesh=source_mesh, target_mesh=<your character mesh>)'})\n"
         "except Exception as e:\n"
         "    _emit({'error': repr(e)})\n"
     )
@@ -109,16 +115,20 @@ def build_retarget_anim(source_anim, source_mesh, target_mesh, destination_path=
         "        at = unreal.AssetToolsHelpers.get_asset_tools()\n"
         "        base = NAME or anim.get_name()\n"
         "        authored = {}; src_auto = tgt_auto = None; rt_asset = None\n"
+        "        def _mk(nm, cls, fac):\n"
+        "            p = DEST + '/' + nm\n"
+        "            if unreal.EditorAssetLibrary.does_asset_exist(p): unreal.EditorAssetLibrary.delete_asset(p)\n"
+        "            return at.create_asset(nm, DEST, cls, fac)\n"
         "        if RT:\n"
         "            rt_asset = unreal.load_asset(RT)\n"
         "        else:\n"
-        "            src_rig = at.create_asset(base + '_SrcRig', DEST, unreal.IKRigDefinition, unreal.IKRigDefinitionFactory())\n"
+        "            src_rig = _mk(base + '_SrcRig', unreal.IKRigDefinition, unreal.IKRigDefinitionFactory())\n"
         "            rc = unreal.IKRigController.get_controller(src_rig)\n"
         "            rc.set_skeletal_mesh(smesh); src_auto = bool(rc.apply_auto_generated_retarget_definition()); rc.apply_auto_fbik()\n"
-        "            tgt_rig = at.create_asset(base + '_TgtRig', DEST, unreal.IKRigDefinition, unreal.IKRigDefinitionFactory())\n"
+        "            tgt_rig = _mk(base + '_TgtRig', unreal.IKRigDefinition, unreal.IKRigDefinitionFactory())\n"
         "            tc = unreal.IKRigController.get_controller(tgt_rig)\n"
         "            tc.set_skeletal_mesh(tmesh); tgt_auto = bool(tc.apply_auto_generated_retarget_definition()); tc.apply_auto_fbik()\n"
-        "            rt_asset = at.create_asset(base + '_RT', DEST, unreal.IKRetargeter, unreal.IKRetargetFactory())\n"
+        "            rt_asset = _mk(base + '_RT', unreal.IKRetargeter, unreal.IKRetargetFactory())\n"
         "            rtc = unreal.IKRetargeterController.get_controller(rt_asset)\n"
         "            rtc.set_ik_rig(unreal.RetargetSourceOrTarget.SOURCE, src_rig)\n"
         "            rtc.set_ik_rig(unreal.RetargetSourceOrTarget.TARGET, tgt_rig)\n"
@@ -150,6 +160,7 @@ def build_retarget_anim(source_anim, source_mesh, target_mesh, destination_path=
         "                   'next': 'cr_bake_anim(sequence, target_actor, retargeted_anim) -> editable rig -> seq_keyframe -> render',\n"
         "                   'note': 'template_matched False => skeleton did not match a UE humanoid template; hand-author chains or pass a retargeter asset.'})\n"
         "except Exception as e:\n"
-        "    _emit({'error': repr(e)})\n"
+        "    import traceback\n"
+        "    _emit({'error': repr(e), 'trace': traceback.format_exc().splitlines()[-6:]})\n"
     )
     return wrap(body)
